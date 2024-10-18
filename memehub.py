@@ -32,7 +32,8 @@ cursor.execute('''
 CREATE TABLE IF NOT EXISTS videos (
     id INTEGER PRIMARY KEY,
     file_id TEXT NOT NULL,
-    description TEXT NOT NULL
+    description TEXT NOT NULL,
+    usage_count INTEGER DEFAULT 0   
 )
 ''')
 conn.commit()
@@ -254,9 +255,9 @@ async def inline_query_handler(inline_query: InlineQuery):
     query = inline_query.query.strip().lower()
 
     if not query:
-        cursor.execute("SELECT id, file_id, description FROM videos")
+        cursor.execute("SELECT id, file_id, description, usage_count FROM videos ORDER BY usage_count DESC LIMIT 15")
     else:
-        cursor.execute("SELECT id, file_id, description FROM videos WHERE LOWER(description) LIKE ?", (f'%{query}%',))
+        cursor.execute("SELECT id, file_id, description, usage_count FROM videos WHERE LOWER(description) LIKE ?", (f'%{query}%',))
 
     results = cursor.fetchall()
 
@@ -272,7 +273,13 @@ async def inline_query_handler(inline_query: InlineQuery):
         for result in results
     ]
 
+    # Увеличиваем счетчик использования для каждого найденного видео
+    for result in results:
+        cursor.execute("UPDATE videos SET usage_count = usage_count + 1 WHERE id = ?", (result[0],))
+    conn.commit()
+
     await bot.answer_inline_query(inline_query.id, results=videos, cache_time=0)
+
 
 
 async def main():
@@ -281,3 +288,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
