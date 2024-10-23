@@ -1,6 +1,8 @@
-from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.methods import DeleteWebhook
+from datetime import datetime
+import csv
+import os
 
+from aiogram.types import FSInputFile
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -20,8 +22,6 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Список id пользователей телеграм, которые могут работать с ботом
-admin_list = [393120135, 703434028]
 
 # Подключение к базе данных SQLite
 conn = sqlite3.connect('videos.db')
@@ -43,6 +43,16 @@ cursor.execute('''
 CREATE TABLE IF NOT EXISTS admins (
     id INTEGER PRIMARY KEY,
     username TEXT
+)
+''')
+conn.commit()
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    username TEXT,
+    last_used TIMESTAMP,
+    inline_query_count INTEGER DEFAULT 1
 )
 ''')
 conn.commit()
@@ -91,6 +101,43 @@ dp.message.middleware(AdminOnlyMiddleware())
 @dp.message(Command('start'))
 async def send_welcome(message: types.Message):
     await message.answer("Привет! Отправь /upload для загрузки видео.")
+
+# Перезапуск ВПН на роутере, специально для Антона
+@dp.message(Command('тумблер'))
+async def send_welcome(message: types.Message):
+    r = requests.post('http://62.133.60.64:51821/api/session', json={'password': 'SHo@K___'})
+    cookies = r.cookies.get_dict()
+    requests.post('http://62.133.60.64:51821/api/wireguard/client/ec75016c-7f6f-4a3c-bccf-b33791cf2aab/disable',
+                  cookies=cookies)
+    requests.post('http://62.133.60.64:51821/api/wireguard/client/ec75016c-7f6f-4a3c-bccf-b33791cf2aab/enable',
+                  cookies=cookies)
+    await message.answer('Как ты заебал! Перезапустил.')
+    
+# Обработчик команды для получения списка пользователей
+@dp.message(Command('getusers'))
+async def get_users(message: types.Message):
+    # Извлекаем всех пользователей из базы данных
+    cursor.execute("SELECT id, username, last_used, inline_query_count FROM users")
+    users = cursor.fetchall()
+
+    # Путь для сохранения CSV-файла
+    file_path = "users.csv"
+
+    # Создаем CSV-файл с данными пользователей
+    with open(file_path, mode="w", newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        # Записываем заголовки
+        writer.writerow(["ID", "Username", "Last Used", "Inline Query Count"])
+
+        # Записываем данные пользователей
+        for user in users:
+            writer.writerow(user)
+
+    # Отправляем CSV-файл администратору
+    await message.answer_document(FSInputFile(file_path))
+
+    # Удаляем файл после отправки (необязательно, но рекомендуется)
+    os.remove(file_path)
 
 
 @dp.message(Command('listadmins'))
@@ -253,11 +300,28 @@ async def cancel_callback(callback_query: types.CallbackQuery):
 @dp.inline_query()
 async def inline_query_handler(inline_query: InlineQuery):
     query = inline_query.query.strip().lower()
+    user_id = inline_query.from_user.id
+    username = inline_query.from_user.username  # username может меняться, просто обновляем при каждом запросе
+#    if username is None:
+#	username = inline_query.from_user.first_name
 
+    # Вставка или обновление информации о пользователе и увеличения счетчика запросов
+    cursor.execute('''
+    INSERT INTO users (id, username, last_used, inline_query_count)
+    VALUES (?, ?, ?, 1)
+    ON CONFLICT(id) DO UPDATE SET
+        username = excluded.username,  -- обновляем username каждый раз, если он изменился
+        last_used = excluded.last_used,
+        inline_query_count = users.inline_query_count + 1
+    ''', (user_id, username, datetime.now()))
+    conn.commit()
+
+    # Поиск видео по запросу
     if not query:
         cursor.execute("SELECT id, file_id, description, usage_count FROM videos ORDER BY usage_count DESC LIMIT 15")
     else:
-        cursor.execute("SELECT id, file_id, description, usage_count FROM videos WHERE LOWER(description) LIKE ?", (f'%{query}%',))
+        cursor.execute("SELECT id, file_id, description, usage_count FROM videos WHERE LOWER(description) LIKE ?",
+                       (f'%{query}%',))
 
     results = cursor.fetchall()
 
@@ -274,12 +338,12 @@ async def inline_query_handler(inline_query: InlineQuery):
     ]
 
     # Увеличиваем счетчик использования для каждого найденного видео
-    for result in results:
-        cursor.execute("UPDATE videos SET usage_count = usage_count + 1 WHERE id = ?", (result[0],))
+    if query:
+        for result in results:
+            cursor.execute("UPDATE videos SET usage_count = usage_count + 1 WHERE id = ?", (result[0],))
     conn.commit()
 
     await bot.answer_inline_query(inline_query.id, results=videos, cache_time=0)
-
 
 
 async def main():
@@ -288,4 +352,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
