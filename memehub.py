@@ -326,9 +326,10 @@ async def cancel_callback(callback_query: types.CallbackQuery):
 async def inline_query_handler(inline_query: InlineQuery):
     query = inline_query.query.strip().lower()
     user_id = inline_query.from_user.id
+    
     username = inline_query.from_user.username  # username может меняться, просто обновляем при каждом запросе
-#    if username is None:
-#	username = inline_query.from_user.first_name
+    if username is None:
+        username = f'{inline_query.from_user.first_name}'
 
     # Вставка или обновление информации о пользователе и увеличения счетчика запросов
     cursor.execute('''
