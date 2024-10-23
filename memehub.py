@@ -1,6 +1,7 @@
 from datetime import datetime
 import csv
 import os
+import shutil
 
 from aiogram.types import FSInputFile
 from aiogram import Bot, Dispatcher, types, F
@@ -14,6 +15,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 import logging
 import sqlite3
 import asyncio
+import requests
 
 API_TOKEN = '7117454247:AAHpIN4gbPdO2M8mKkbmCg1vfJqdi-SRFpk'
 
@@ -112,7 +114,30 @@ async def send_welcome(message: types.Message):
     requests.post('http://62.133.60.64:51821/api/wireguard/client/ec75016c-7f6f-4a3c-bccf-b33791cf2aab/enable',
                   cookies=cookies)
     await message.answer('Как ты заебал! Перезапустил.')
-    
+
+@dp.message(Command('export_db'))
+async def export_db(message: types.Message):
+    # Получаем текущую директорию, где находится файл бота
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Формируем путь к базе данных
+    db_path = os.path.join(current_dir, 'videos.db')  # Имя вашего файла базы данных
+    export_path = os.path.join(current_dir, 'exported_videos.db')  # Имя файла для экспорта
+
+    try:
+        # Копируем базу данных в новое место
+        shutil.copy(db_path, export_path)
+
+        # Создаем объект InputFile и отправляем его
+        await message.answer_document(FSInputFile(export_path))
+
+
+        # Удаляем файл после отправки, если он больше не нужен
+        os.remove(export_path)
+    except Exception as e:
+        await message.answer(f"Произошла ошибка: {str(e)}")
+
+
 # Обработчик команды для получения списка пользователей
 @dp.message(Command('getusers'))
 async def get_users(message: types.Message):
