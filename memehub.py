@@ -2,6 +2,7 @@ from datetime import datetime
 import csv
 import os
 import shutil
+import yt_dlp
 
 from aiogram.types import FSInputFile
 from aiogram import Bot, Dispatcher, types, F
@@ -69,7 +70,8 @@ class VideoState(StatesGroup):
     awaiting_delete_id = State()
     awaiting_admin_id = State()
     awaiting_del_admin_id = State()
-
+    awaiting_video_link = State()
+    
 
 # Функция для проверки, является ли пользователь администратором
 def is_admin(user_id: int) -> bool:
@@ -84,7 +86,7 @@ class AdminOnlyMiddleware(BaseMiddleware):
         if isinstance(event, Message):
             # Проверяем, является ли сообщение текстовым
             if event.content_type == 'text':
-                if event.text.startswith("/start"):
+                if event.text.startswith("/start") or (event.text.startswith("/тумблер") and event.from_user.id == 1332129235):
                     # Разрешаем команду /start для всех пользователей
                     return await handler(event, data)
                 if not is_admin(event.from_user.id):
@@ -209,6 +211,13 @@ async def handle_delmem(message: types.Message, state: FSMContext):
     await state.set_state(VideoState.awaiting_delete_id)
 
 
+@dp.message(Command('yt-dlp'))
+async def request_video_link(message: types.Message, state: FSMContext):
+    await message.answer("Пожалуйста, отправьте ссылку на видео для скачивания.")
+    await state.set_state(VideoState.awaiting_video_link)
+
+
+
 # Обработчик для видео
 @dp.message(F.content_type == "video")
 async def handle_video(message: types.Message, state: FSMContext):
@@ -302,7 +311,34 @@ async def handle_text_messages(message: types.Message, state: FSMContext):
         conn.commit()
         await message.answer(f"Пользователь с ID {user_input_id} добавлен в администраторы.")
         await state.clear()
+    elif current_state == VideoState.awaiting_video_link.state:
+        url = message.text
+        await message.answer("Скачивание видео...")
 
+        # Опции для yt-dlp
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': 'downloaded_video.%(ext)s'
+        }
+
+        # Скачивание видео
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=True)
+                file_path = ydl.prepare_filename(info)
+                file_title = info.get("title", "video")
+
+                # Отправка видео в Telegram
+                await message.answer_video(FSInputFile(file_path), caption=file_title)
+
+                # Удаление файла после отправки
+                os.remove(file_path)
+                await message.answer("Видео успешно отправлено!")
+            except Exception as e:
+                await message.answer(f"Произошла ошибка при загрузке видео: {e}")
+
+        # Очистка состояния
+        await state.clear()
 
 # Обработчики колбэков для кнопок "Удалить" и "Отменить"
 @dp.callback_query(F.data.startswith("delete:"))
